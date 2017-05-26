@@ -1,13 +1,10 @@
 """Rendering code for code128 barcode"""
 from cStringIO import StringIO
-try:
-    from PIL import Image, ImageFont, ImageDraw
-except ImportError:
-    import Image
-    import ImageFont
-    import ImageDraw
+from PIL import Image, ImageFont, ImageDraw
 import logging
 import os
+# NOTE(image)
+import math
 
 log = logging.getLogger("code128")
 
@@ -38,6 +35,8 @@ class Code128Renderer:
         self.text = text
         self.image_width = None
         self.image_height = None
+        # NOTE(image)
+        self.offset = None
 
     def get_pilimage(self, bar_width):
         """Return the barcode as a PIL object"""
@@ -71,26 +70,39 @@ class Code128Renderer:
         # Total image width
         self.image_width = (2 * quiet_width) + (num_bars * bar_width)
 
-        # Image height 30% of width
+        # NOTE(image two line)
+        self.offset = int(math.ceil(self.image_width * 2 / 11.3))
+        self.image_width += self.offset
+        #print '*'*100
+        #print 'bar_width:' + str(self.image_width)
+
+        # Image height 40% of width
         label_border = self.options.get('label_border', 0)
-        self.image_height = self.options.get('height') or (self.image_width / 3)
+        self.image_height = self.options.get('height') or (self.image_width * 2 / 5)
         bar_height = self.image_height - label_border - fontsize
 
         # Image: has a white background
         bottom_border = self.options.get('bottom_border', 0)
+        # NOTE(------TOP BORDER)
+        top_border = self.options.get('top_border')
         img = Image.new('L', (
-            self.image_width, self.image_height + bottom_border), 255)
+            self.image_width, self.image_height + bottom_border + top_border), 255)
 
         class BarWriter:
             """Class which moves across the image, writing out bars"""
-            def __init__(self, img, bar_height):
+            # NOTE(image)
+            def __init__(self, img, bar_height, img_height, img_offset):
                 self.img = img
-                self.current_x = quiet_width
+                # NOTE(image)
+                self.current_x = int(math.ceil(quiet_width * 5 / 3))
                 if show_label:
                     self.symbol_top = quiet_width / 2
                 else:
                     self.symbol_top = 0
                 self.bar_height = bar_height
+                # NOTE(image)
+                self.img_height = img_height
+                self.img_offset = img_offset
 
             def write_bar(self, value):
                 """Draw a bar at the current position,
@@ -99,9 +111,11 @@ class Code128Renderer:
                 # only write anything to the image if bar value is 1
                 if value == 1:
                     for ypos in range(self.symbol_top, self.bar_height):
-                        for xpos in range(self.current_x,
-                                          self.current_x + bar_width):
-                            img.putpixel((xpos, ypos), 0)
+                        # NOTE(image two line)
+                        for xpos in range(self.current_x + self.img_offset,\
+                            self.current_x + bar_width + self.img_offset):
+                            # NOTE(------TOP BORDER)
+                            img.putpixel((xpos, ypos + top_border), 0)
                 self.current_x += bar_width
 
             def write_bars(self, bars):
@@ -109,16 +123,29 @@ class Code128Renderer:
                 for bar in bars:
                     self.write_bar(int(bar))
 
+            # NOTE(image func)
+            def generate_ver_line(self):
+                '''generate vertical line on the left'''
+                for xpos in range(self.img_offset + 25 - 2,\
+                                self.img_offset + 25 + 1):
+                    for ypos in range(self.img_height):
+                        img.putpixel((xpos, ypos,), 50)
+
         # draw the barcode bars themself
-        writer = BarWriter(img, bar_height)
+        writer = BarWriter(img, bar_height,\
+                self.image_height + bottom_border + top_border, self.offset)
         writer.write_bars(self.bars)
+        # NOTE(image)
+        writer.generate_ver_line()
 
         # Draw the text
         draw = ImageDraw.Draw(img)
         if show_label:
             xtextwidth = font.getsize(self.text)[0]
-            xtextpos = self.image_width / 2 - (xtextwidth / 2)
-            ytextpos = bar_height + label_border
+            # NOTE(image)
+            xtextpos = self.image_width / 2 - (xtextwidth / 2) + self.offset / 2
+            # NOTE(------TOP BORDER)
+            ytextpos = bar_height + label_border + top_border
             draw.text((xtextpos, ytextpos), self.text, font=font)
         return img
 
